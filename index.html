@@ -53,8 +53,13 @@ small{color:var(--sub)}
 
 <!-- ADMIN -->
 <div id="admin" hidden>
-<nav><button data-t="ag" class="on">Agents</button><button data-t="hi">Historique</button><button data-t="no">Notifications</button><button data-t="co">Comptes</button><button data-t="pa">Paramètres</button></nav>
+<nav><button data-t="ag" class="on">Agents</button><button data-t="ti">Temps</button><button data-t="hi">Historique</button><button data-t="no">Notifications</button><button data-t="co">Comptes</button><button data-t="pa">Paramètres</button></nav>
 <div class="tab" id="t_ag"><div id="tiles"></div><div class="card"><table><tr><th>Agent</th><th>Statut</th><th>Motif</th><th>Temps de connexion</th></tr><tbody id="agents"></tbody></table></div></div>
+<div class="tab" id="t_ti" hidden>
+<div class="card"><h3>Temps de connexion par jour</h3>
+<select id="tf" onchange="renderTime()"><option value="">Tous les agents</option></select>
+<div id="bars" style="margin-top:8px"></div></div>
+<div class="card"><table><tr><th>Date</th><th>Agent</th><th>Durée</th><th>Actions</th></tr><tbody id="times"></tbody></table></div></div>
 <div class="tab" id="t_hi" hidden><div class="card">
 <div style="margin-bottom:12px">
 <button class="danger" onclick="purgeLogs()">Tout supprimer</button>
@@ -141,7 +146,10 @@ function startAgent(u){
       if(r<=0)timeout();
     }
   },1000));
-  timers.push(setInterval(()=>{if(st!=='disconnected')U.doc(me).update({lastSeen:Date.now(),total:firebase.firestore.FieldValue.increment(30)})},30000));
+    timers.push(setInterval(()=>{if(st!=='disconnected'){
+    U.doc(me).update({lastSeen:Date.now(),total:firebase.firestore.FieldValue.increment(30)});
+    db.collection('daily').doc(me+'_'+today()).set({user:me,date:today(),sec:firebase.firestore.FieldValue.increment(30)},{merge:true});
+  }},30000));
   addEventListener('beforeunload',()=>{if(st!=='disconnected')U.doc(me).update({status:'disconnected',reason:'Fermeture de la page'})});
 }
 async function declare(){
@@ -166,6 +174,7 @@ function startAdmin(){
   });
   U.onSnapshot(s=>{users=s.docs.map(d=>({id:d.id,...d.data()}));render()});
   setInterval(render,15000);
+    db.collection('daily').orderBy('date','desc').limit(500).onSnapshot(s=>{dly=s.docs.map(d=>({id:d.id,...d.data()}));renderTime()});
     db.collection('logs').orderBy('ts','desc').limit(100).onSnapshot(s=>
     $('logs').innerHTML=s.docs.map(d=>{const l=d.data();return `<tr><td>${dt(l.ts)}</td><td>${esc(l.user)}</td><td><span class="badge ${l.type}">${L[l.type]}</span> ${esc(l.text)}</td><td><button class="danger" onclick="delLog('${d.id}')">🗑</button></td></tr>`}).join(''));
   let first=true;
@@ -203,6 +212,40 @@ async function purgeLogs(days){
     const b=db.batch(); s.docs.slice(i,i+400).forEach(d=>b.delete(d.ref)); await b.commit();
   }
   alert(s.size+' ligne(s) supprimée(s)');
+}
+// ---- Temps de connexion par jour ----
+let dly=[];
+const today=()=>new Date().toLocaleDateString('sv-SE');   // format AAAA-MM-JJ
+const inc=n=>firebase.firestore.FieldValue.increment(n);
+
+function renderTime(){
+  const ag=users.filter(u=>u.role==='agent'), f=$('tf').value;
+  $('tf').innerHTML='<option value="">Tous les agents</option>'+ag.map(u=>`<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('');
+  $('tf').value=f;
+  const rows=dly.filter(r=>!f||r.user===f), byDay={};
+  rows.forEach(r=>byDay[r.date]=(byDay[r.date]||0)+r.sec);
+  const ds=Object.keys(byDay).sort().slice(-14), max=Math.max(1,...ds.map(d=>byDay[d]));
+  $('bars').innerHTML=ds.map(d=>`<div style="display:flex;align-items:center;gap:8px;margin:6px 0"><small style="width:80px">${d}</small><div style="flex:1;background:var(--bg);border-radius:6px"><div style="width:${byDay[d]/max*100}%;background:var(--blue);height:20px;border-radius:6px"></div></div><b style="width:85px;text-align:right">${fmt(byDay[d])}</b></div>`).join('')||'<small>Aucune donnée</small>';
+  $('times').innerHTML=rows.map(r=>`<tr><td>${r.date}</td><td>${esc(r.user)}</td><td>${fmt(r.sec)}</td><td><button onclick="setTime('${r.id}')">Modifier</button> <button class="gray" onclick="cutTime('${r.id}')">Retirer une durée</button> <button class="danger" onclick="delTime('${r.id}')">🗑</button></td></tr>`).join('')||'<tr><td colspan=4>Aucune donnée</td></tr>';
+}
+async function adjust(id,newSec){            // fixe la durée du jour ET corrige le total de l'agent
+  const r=dly.find(x=>x.id===id), diff=newSec-r.sec;
+  await db.collection('daily').doc(id).update({sec:newSec});
+  await U.doc(r.user).update({total:inc(diff)});
+}
+function setTime(id){
+  const r=dly.find(x=>x.id===id), m=prompt(`Nouvelle durée pour ${r.user} le ${r.date} (en minutes) :`,Math.round(r.sec/60));
+  if(m!==null&&m.trim()!==''&&+m>=0)adjust(id,Math.round(+m*60));
+}
+function cutTime(id){
+  const r=dly.find(x=>x.id===id), m=prompt(`Durée à retirer pour ${r.user} le ${r.date} (en minutes) :`,'30');
+  if(m!==null&&+m>0)adjust(id,Math.max(0,r.sec-Math.round(+m*60)));
+}
+async function delTime(id){
+  const r=dly.find(x=>x.id===id);
+  if(!confirm(`Supprimer tout le temps de ${r.user} le ${r.date} ?`))return;
+  await db.collection('daily').doc(id).delete();
+  await U.doc(r.user).update({total:inc(-r.sec)});
 }
 </script>
 </body>
