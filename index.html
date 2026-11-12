@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Suivi d'activité</title>
+<style>
+:root{--bg:#f0f2f5;--card:#fff;--txt:#050505;--sub:#65676b;--line:#dadde1;--blue:#0866ff}
+[data-theme=dark]{--bg:#18191a;--card:#242526;--txt:#e4e6eb;--sub:#b0b3b8;--line:#3e4042}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--bg);color:var(--txt)}
+header{background:var(--card);box-shadow:0 1px 2px #0003;padding:10px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+header b{color:var(--blue);font-size:22px;flex:1}
+main{max-width:1000px;margin:16px auto;padding:0 12px}
+.card{background:var(--card);border-radius:8px;box-shadow:0 1px 2px #0002;padding:16px;margin-bottom:16px;overflow-x:auto}
+h3{margin:0 0 12px}
+input,select{padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--txt);font-size:15px;margin:4px 4px 4px 0;max-width:100%}
+button{background:var(--blue);color:#fff;border:0;border-radius:6px;padding:9px 14px;font-weight:600;cursor:pointer;font-size:14px}
+button.gray{background:var(--line);color:var(--txt)}button.danger{background:#e41e3f}
+nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+nav button{background:var(--card);color:var(--sub)}nav button.on{background:var(--blue);color:#fff}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);font-size:14px}
+small{color:var(--sub)}
+.badge{padding:4px 10px;border-radius:12px;color:#fff;font-size:13px;font-weight:600;white-space:nowrap}
+.active{background:#31a24c}.inactive{background:#f7931e}.waiting{background:#f5c518;color:#000}.disconnected{background:#e41e3f}
+#tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
+.tile{border-radius:8px;padding:16px;color:#fff;display:flex;flex-direction:column}.tile b{font-size:32px}
+.tile.waiting{color:#000}
+.big{font-size:20px;padding:12px 24px;display:inline-block;border-radius:24px}
+#modal{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:20}
+#modal[hidden],[hidden]{display:none!important}
+#modal .card{max-width:400px;width:92%;overflow:visible}
+#toast{position:fixed;right:12px;bottom:12px;display:flex;flex-direction:column;gap:8px;z-index:30}
+#toast div{background:var(--blue);color:#fff;padding:12px 16px;border-radius:8px;box-shadow:0 2px 8px #0005}
+#login{max-width:360px;margin:60px auto}
+</style>
+</head>
+<body>
+<header><b>Suivi d'activité</b><span id="who"></span>
+<button class="gray" onclick="theme()">🌓</button><button class="gray" id="out" hidden onclick="logout()">Quitter</button></header>
+<main>
+
+<!-- CONNEXION -->
+<div id="login" class="card"><h3>Connexion</h3>
+<input id="u" placeholder="Identifiant" style="width:100%"><input id="p" type="password" placeholder="Mot de passe" style="width:100%" onkeydown="if(event.key=='Enter')login()">
+<p id="err" style="color:#e41e3f"></p><button style="width:100%" onclick="login()">Se connecter</button></div>
+
+<!-- AGENT -->
+<div id="agent" hidden><div class="card" style="text-align:center">
+<h3 id="hello"></h3><span id="mystat" class="badge big"></span>
+<p>Temps de connexion cumulé : <b id="mytime"></b></p>
+<small>Votre activité est suivie. Restez actif ou déclarez un motif d'absence quand la fenêtre apparaît.</small></div></div>
+
+<!-- ADMIN -->
+<div id="admin" hidden>
+<nav><button data-t="ag" class="on">Agents</button><button data-t="hi">Historique</button><button data-t="no">Notifications</button><button data-t="co">Comptes</button><button data-t="pa">Paramètres</button></nav>
+<div class="tab" id="t_ag"><div id="tiles"></div><div class="card"><table><tr><th>Agent</th><th>Statut</th><th>Motif</th><th>Temps de connexion</th></tr><tbody id="agents"></tbody></table></div></div>
+<div class="tab" id="t_hi" hidden><div class="card">
+<div style="margin-bottom:12px">
+<button class="danger" onclick="purgeLogs()">Tout supprimer</button>
+<button class="gray" onclick="purgeLogs(+$('days').value)">Supprimer ce qui date de plus de</button>
+<input id="days" type="number" min="1" value="30" style="width:70px"> jours
+</div>
+<table><tr><th>Date</th><th>Agent</th><th>Événement</th><th></th></tr><tbody id="logs"></tbody></table></div></div>
+<div class="tab" id="t_no" hidden><div class="card"><table><tr><th>Date</th><th>Notification</th></tr><tbody id="notifs"></tbody></table></div></div>
+<div class="tab" id="t_co" hidden><div class="card"><h3>Créer un agent</h3>
+<input id="nu" placeholder="Identifiant (sans espace)"><input id="nn" placeholder="Nom affiché"><input id="np" placeholder="Mot de passe"><button onclick="create()">Créer</button></div>
+<div class="card"><table><tr><th>Identifiant</th><th>Nom</th><th>Actions</th></tr><tbody id="accts"></tbody></table></div></div>
+<div class="tab" id="t_pa" hidden><div class="card"><h3>Paramètres de suivi</h3>
+<p>Inactivité avant notification (minutes) <input id="fi" type="number" min="1"></p>
+<p>Délai de réponse avant déconnexion (minutes) <input id="fr" type="number" min="1"></p>
+<button onclick="saveCfg()">Enregistrer</button></div>
+<div class="card"><h3>Changer le mot de passe Admin</h3><input id="ap" placeholder="Nouveau mot de passe"><button onclick="reset('Admin',$('ap').value)">Modifier</button></div></div>
+</div>
+</main>
+
+<!-- FENÊTRE MOTIF -->
+<div id="modal" hidden><div class="card"><h3>⚠️ Êtes-vous toujours là ?</h3>
+<p>Aucune activité détectée. Indiquez le motif, sinon vous serez déconnecté dans <b id="cd"></b>.</p>
+<select id="reason" style="width:100%"><option>Pause</option><option>Réunion</option><option>Appel téléphonique</option><option>Tâche hors ordinateur</option><option>Autre</option></select>
+<button style="width:100%;margin-top:8px" onclick="declare()">Valider</button></div></div>
+<div id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script>
+// ====== 1. COLLEZ ICI VOTRE CONFIG FIREBASE ======
+firebase.initializeApp({
+  apiKey:"AIzaSyABgQkMUZJ7NfaqnYwh2MOdEydEzVIudQU", authDomain:"suivi-activite-16df1.firebaseapp.com", projectId:"suivi-activite-16df1",
+  storageBucket:"suivi-activite-16df1.firebasestorage.app", messagingSenderId:"728015366377", appId:"1:728015366377:web:13c113dc667b4d04efe878"
+});
+// =================================================
+const db=firebase.firestore(), U=db.collection('users'), $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const L={active:'Actif',inactive:'Inactif',waiting:'En attente de réponse',disconnected:'Déconnecté'};
+const fmt=s=>`${Math.floor(s/3600)}h ${String(Math.floor(s%3600/60)).padStart(2,'0')}min`;
+const dt=t=>new Date(t).toLocaleString('fr-FR');
+const sha=async s=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))].map(x=>x.toString(16).padStart(2,'0')).join('');
+let cfg={inactivity:5,response:3}, me, st, last=Date.now(), since=0, users=[], deadline=0, timers=[];
+
+// ---- Thème (mémorisé) ----
+document.documentElement.dataset.theme=localStorage.theme||'light';
+function theme(){const t=document.documentElement.dataset.theme=='dark'?'light':'dark';document.documentElement.dataset.theme=localStorage.theme=t}
+
+// ---- Initialisation : compte Admin par défaut + paramètres ----
+U.doc('Admin').get().then(async d=>{if(!d.exists)U.doc('Admin').set({name:'Administrateur',role:'admin',pass:await sha('adminpass'),status:'disconnected',total:0,lastSeen:0})});
+db.doc('settings/config').onSnapshot(d=>{if(d.exists)cfg=d.data()});
+
+// ---- Connexion ----
+async function login(){
+  const id=$('u').value.trim(); if(!/^[\w.-]+$/.test(id))return $('err').textContent='Identifiants incorrects';
+  const d=await U.doc(id).get();
+  if(!d.exists||d.data().pass!==await sha($('p').value))return $('err').textContent='Identifiants incorrects';
+  me=id; $('login').hidden=true; $('out').hidden=false; $('who').textContent=d.data().name;
+  d.data().role==='admin'?startAdmin():startAgent(d.data());
+}
+function logout(){ if(me&&st)setStatus('disconnected','Déconnexion volontaire').then(()=>location.reload()); else location.reload() }
+
+// ================= AGENT =================
+const log=(type,text)=>db.collection('logs').add({user:me,type,text:text||'',ts:Date.now()});
+const notify=text=>db.collection('notifs').add({text,ts:Date.now()});
+async function setStatus(s,reason){
+  st=s; since=Date.now(); paint();
+  await U.doc(me).update({status:s,reason:reason||'',lastSeen:Date.now()});
+  log(s,reason);
+}
+function paint(){const m=$('mystat');m.className='badge big '+st;m.textContent=L[st]}
+
+function startAgent(u){
+  $('agent').hidden=false; $('hello').textContent='Bonjour '+u.name;
+  U.doc(me).onSnapshot(d=>$('mytime').textContent=fmt(d.data().total||0));
+  setStatus('active');
+  ['mousemove','keydown','click','touchstart','scroll'].forEach(e=>addEventListener(e,()=>{
+    last=Date.now();
+    if(st==='inactive'&&Date.now()-since>10000)setStatus('active'); // reprise d'activité
+  },{passive:true}));
+  timers.push(setInterval(()=>{
+    if(st==='active'&&Date.now()-last>cfg.inactivity*60000){setStatus('waiting');deadline=Date.now()+cfg.response*60000;$('modal').hidden=false}
+    if(st==='waiting'){
+      const r=Math.max(0,deadline-Date.now()); $('cd').textContent=Math.floor(r/60000)+':'+String(Math.floor(r%60000/1000)).padStart(2,'0');
+      if(r<=0)timeout();
+    }
+  },1000));
+  timers.push(setInterval(()=>{if(st!=='disconnected')U.doc(me).update({lastSeen:Date.now(),total:firebase.firestore.FieldValue.increment(30)})},30000));
+  addEventListener('beforeunload',()=>{if(st!=='disconnected')U.doc(me).update({status:'disconnected',reason:'Fermeture de la page'})});
+}
+async function declare(){
+  const r=$('reason').value; $('modal').hidden=true;
+  await setStatus('inactive',r); notify(`${me} est inactif — motif : ${r}`);
+}
+async function timeout(){
+  $('modal').hidden=true; timers.forEach(clearInterval);
+  await setStatus('disconnected','Aucune réponse à la notification');
+  notify(`⛔ ${me} a été déconnecté automatiquement (aucune réponse)`);
+  document.body.innerHTML='<div class="card" style="max-width:400px;margin:80px auto;text-align:center"><h3>Session expirée</h3><p>Vous avez été déconnecté pour inactivité.</p><button onclick="location.reload()">Se reconnecter</button></div>';
+}
+
+// ================= ADMIN =================
+const eff=u=>(u.status!=='disconnected'&&Date.now()-u.lastSeen>90000)?'disconnected':u.status;
+function startAdmin(){
+  $('admin').hidden=false;
+  document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x==b));
+    document.querySelectorAll('.tab').forEach(t=>t.hidden=t.id!=='t_'+b.dataset.t);
+    if(b.dataset.t=='pa'){$('fi').value=cfg.inactivity;$('fr').value=cfg.response}
+  });
+  U.onSnapshot(s=>{users=s.docs.map(d=>({id:d.id,...d.data()}));render()});
+  setInterval(render,15000);
+    db.collection('logs').orderBy('ts','desc').limit(100).onSnapshot(s=>
+    $('logs').innerHTML=s.docs.map(d=>{const l=d.data();return `<tr><td>${dt(l.ts)}</td><td>${esc(l.user)}</td><td><span class="badge ${l.type}">${L[l.type]}</span> ${esc(l.text)}</td><td><button class="danger" onclick="delLog('${d.id}')">🗑</button></td></tr>`}).join(''));
+  let first=true;
+  db.collection('notifs').orderBy('ts','desc').limit(50).onSnapshot(s=>{
+    $('notifs').innerHTML=s.docs.map(d=>d.data()).map(n=>`<tr><td>${dt(n.ts)}</td><td>${esc(n.text)}</td></tr>`).join('');
+    if(!first)s.docChanges().filter(c=>c.type=='added').forEach(c=>{const t=document.createElement('div');t.textContent=c.doc.data().text;$('toast').append(t);setTimeout(()=>t.remove(),8000)});
+    first=false;
+  });
+}
+function render(){
+  const ag=users.filter(u=>u.role==='agent'), c={active:0,inactive:0,waiting:0,disconnected:0};
+  ag.forEach(u=>c[eff(u)]++);
+  $('tiles').innerHTML=Object.keys(c).map(k=>`<div class="tile ${k}"><b>${c[k]}</b><span>${L[k]}</span></div>`).join('');
+  $('agents').innerHTML=ag.map(u=>`<tr><td>${esc(u.name)}<br><small>${esc(u.id)}</small></td><td><span class="badge ${eff(u)}">${L[eff(u)]}</span></td><td>${eff(u)==='inactive'?esc(u.reason):''}</td><td>${fmt(u.total||0)}</td></tr>`).join('')||'<tr><td colspan=4>Aucun agent</td></tr>';
+  $('accts').innerHTML=ag.map(u=>`<tr><td>${esc(u.id)}</td><td>${esc(u.name)}</td><td><button onclick="edit('${u.id}')">Modifier</button> <button class="gray" onclick="reset('${u.id}')">Mot de passe</button> <button class="danger" onclick="del('${u.id}')">Supprimer</button></td></tr>`).join('');
+}
+async function create(){
+  const i=$('nu').value.trim(),n=$('nn').value.trim(),p=$('np').value;
+  if(!/^[\w.-]+$/.test(i)||!p)return alert('Identifiant (lettres, chiffres, . _ -) et mot de passe requis');
+  if((await U.doc(i).get()).exists)return alert('Identifiant déjà utilisé');
+  await U.doc(i).set({name:n||i,role:'agent',pass:await sha(p),status:'disconnected',total:0,lastSeen:0});
+  $('nu').value=$('nn').value=$('np').value='';
+}
+function edit(id){const n=prompt('Nouveau nom :',users.find(u=>u.id==id).name);if(n)U.doc(id).update({name:n})}
+async function reset(id,p){p=p||prompt('Nouveau mot de passe pour '+id+' :');if(p){await U.doc(id).update({pass:await sha(p)});alert('Mot de passe modifié')}}
+function del(id){if(confirm('Supprimer '+id+' ?'))U.doc(id).delete()}
+function saveCfg(){db.doc('settings/config').set({inactivity:+$('fi').value||5,response:+$('fr').value||3}).then(()=>alert('Enregistré'))}
+// ---- Suppression de l'historique ----
+const delLog=id=>confirm('Supprimer cette ligne ?')&&db.collection('logs').doc(id).delete();
+async function purgeLogs(days){
+  if(!confirm(days?`Supprimer tout l'historique de plus de ${days} jours ?`:"Supprimer TOUT l'historique ? Action irréversible."))return;
+  let q=db.collection('logs'); if(days)q=q.where('ts','<',Date.now()-days*864e5);
+  const s=await q.get();
+  for(let i=0;i<s.docs.length;i+=400){            // Firestore limite à 500 suppressions par lot
+    const b=db.batch(); s.docs.slice(i,i+400).forEach(d=>b.delete(d.ref)); await b.commit();
+  }
+  alert(s.size+' ligne(s) supprimée(s)');
+}
+</script>
+</body>
+</html>
