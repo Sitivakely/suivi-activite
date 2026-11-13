@@ -138,6 +138,7 @@ function startAgent(u){
   ['mousemove','keydown','click','touchstart','scroll'].forEach(e=>addEventListener(e,()=>{
     last=Date.now();
     if(st==='inactive'&&Date.now()-since>10000)setStatus('active'); // reprise d'activité
+    if(st==='waiting'){$('modal').hidden=true;setStatus('active')} // activité pendant l'attente : on annule la notification
   },{passive:true}));
   timers.push(setInterval(()=>{
     if(st==='active'&&Date.now()-last>cfg.inactivity*60000){setStatus('waiting');deadline=Date.now()+cfg.response*60000;$('modal').hidden=false}
@@ -164,7 +165,7 @@ async function timeout(){
 }
 
 // ================= ADMIN =================
-const eff=u=>(u.status!=='disconnected'&&Date.now()-u.lastSeen>90000)?'disconnected':u.status;
+const eff=u=>(u.status!=='disconnected'&&Date.now()-u.lastSeen>180000)?'disconnected':u.status;
 function startAdmin(){
   $('admin').hidden=false;
   document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
