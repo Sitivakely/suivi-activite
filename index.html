@@ -102,6 +102,7 @@ const fmt=s=>`${Math.floor(s/3600)}h ${String(Math.floor(s%3600/60)).padStart(2,
 const dt=t=>new Date(t).toLocaleString('fr-FR');
 const sha=async s=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))].map(x=>x.toString(16).padStart(2,'0')).join('');
 let cfg={inactivity:5,response:3}, me, st, last=Date.now(), since=0, users=[], deadline=0, timers=[];
+const SS={g(){try{const v=localStorage.getItem('ses');if(v)return v}catch(e){}try{return JSON.parse(window.name).ses||''}catch(e){return''}},s(v){try{localStorage.setItem('ses',v)}catch(e){}try{window.name=JSON.stringify({ses:v})}catch(e){}},r(){try{localStorage.removeItem('ses')}catch(e){}window.name=''}};
 
 // ---- Thème (mémorisé) ----
 document.documentElement.dataset.theme=localStorage.theme||'light';
@@ -116,10 +117,9 @@ async function login(){
   const id=$('u').value.trim(); if(!/^[\w.-]+$/.test(id))return $('err').textContent='Identifiants incorrects';
   const d=await U.doc(id).get();
   if(!d.exists||d.data().pass!==await sha($('p').value))return $('err').textContent='Identifiants incorrects';
-  me=id; $('login').hidden=true; $('out').hidden=false; $('who').textContent=d.data().name;
-  d.data().role==='admin'?startAdmin():startAgent(d.data());
+    SS.s(id+':'+d.data().pass); enter(id,d.data());
 }
-function logout(){ if(me&&st)setStatus('disconnected','Déconnexion volontaire').then(()=>location.reload()); else location.reload() }
+function logout(){ SS.r(); if(me&&st)setStatus('disconnected','Déconnexion volontaire').then(()=>location.reload()); else location.reload() }
 
 // ================= AGENT =================
 const log=(type,text)=>db.collection('logs').add({user:me,type,text:text||'',ts:Date.now()});
@@ -157,7 +157,7 @@ async function declare(){
   await setStatus('inactive',r); notify(`${me} est inactif — motif : ${r}`);
 }
 async function timeout(){
-  $('modal').hidden=true; timers.forEach(clearInterval);
+  $('modal').hidden=true; timers.forEach(clearInterval); SS.r();
   await setStatus('disconnected','Aucune réponse à la notification');
   notify(`⛔ ${me} a été déconnecté automatiquement (aucune réponse)`);
   document.body.innerHTML='<div class="card" style="max-width:400px;margin:80px auto;text-align:center"><h3>Session expirée</h3><p>Vous avez été déconnecté pour inactivité.</p><button onclick="location.reload()">Se reconnecter</button></div>';
@@ -247,6 +247,10 @@ async function delTime(id){
   await db.collection('daily').doc(id).delete();
   await U.doc(r.user).update({total:inc(-r.sec)});
 }
+// ---- Restauration de session après actualisation ----
+function enter(id,u){me=id;$('login').hidden=true;$('out').hidden=false;$('who').textContent=u.name;u.role==='admin'?startAdmin():startAgent(u)}
+async function restore(){const s=SS.g(),i=s.indexOf(':');if(i<1)return;const id=s.slice(0,i);try{const d=await U.doc(id).get();if(d.exists&&d.data().pass===s.slice(i+1))enter(id,d.data());else SS.r()}catch(e){}}
+restore();
 </script>
 </body>
 </html>
